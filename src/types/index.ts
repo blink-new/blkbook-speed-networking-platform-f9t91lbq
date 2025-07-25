@@ -6,8 +6,8 @@ export interface User {
   jobTitle: string
   company: string
   industry: string
-  goals: string[]
-  skills: string[]
+  goals: string[] // Stored as JSON string in DB, parsed to array in app
+  skills: string[] // Stored as JSON string in DB, parsed to array in app
   meetingLink: string
   profileImage?: string
   createdAt: string

@@ -111,8 +111,8 @@ export default function OnboardingFlow() {
         jobTitle: formData.jobTitle,
         company: formData.company,
         industry: formData.industry,
-        goals: formData.goals,
-        skills: formData.skills,
+        goals: JSON.stringify(formData.goals),
+        skills: JSON.stringify(formData.skills),
         meetingLink: formData.meetingLink,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

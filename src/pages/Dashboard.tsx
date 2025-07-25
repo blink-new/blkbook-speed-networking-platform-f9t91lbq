@@ -32,7 +32,18 @@ export default function Dashboard() {
         return
       }
 
-      setUser(userProfile[0])
+      // Parse JSON fields and set user
+      const userData = userProfile[0]
+      const parsedUser = {
+        ...userData,
+        goals: typeof userData.goals === 'string' ? 
+          (userData.goals.startsWith('[') ? JSON.parse(userData.goals) : [userData.goals]) : 
+          userData.goals,
+        skills: typeof userData.skills === 'string' ? 
+          (userData.skills.startsWith('[') ? JSON.parse(userData.skills) : [userData.skills]) : 
+          userData.skills
+      }
+      setUser(parsedUser)
 
       // Load upcoming events
       const upcomingEvents = await blink.db.events.list({
@@ -53,6 +64,96 @@ export default function Dashboard() {
       setLoading(false)
     }
   }, [navigate, toast])
+
+  const generateAIInvitations = useCallback(async (userId: string, eventId: string) => {
+    try {
+      // Get user's profile and goals
+      const userProfile = await blink.db.users.list({
+        where: { id: userId },
+        limit: 1
+      })
+
+      if (userProfile.length === 0) return
+
+      const user = userProfile[0]
+      const userGoals = typeof user.goals === 'string' ? 
+        (user.goals.startsWith('[') ? JSON.parse(user.goals) : [user.goals]) : 
+        user.goals
+
+      // Get user's imported contacts
+      const importedContacts = user.importedContacts ? 
+        JSON.parse(user.importedContacts) : []
+
+      // AI matching logic: Find contacts that match user's goals
+      const relevantContacts = importedContacts.filter((contact: any) => {
+        if (!contact.email || !contact.job_title) return false
+
+        // Simple AI matching based on job titles and goals
+        const jobTitle = contact.job_title.toLowerCase()
+        const company = (contact.company || '').toLowerCase()
+
+        return userGoals.some((goal: string) => {
+          const goalLower = goal.toLowerCase()
+          
+          // Match fundraising goals with investors
+          if (goalLower.includes('fundraising') || goalLower.includes('investment')) {
+            return jobTitle.includes('investor') || jobTitle.includes('vc') || 
+                   jobTitle.includes('partner') || company.includes('capital')
+          }
+          
+          // Match co-founder goals with entrepreneurs
+          if (goalLower.includes('co-founder') || goalLower.includes('cofounder')) {
+            return jobTitle.includes('founder') || jobTitle.includes('ceo') || 
+                   jobTitle.includes('entrepreneur')
+          }
+          
+          // Match hiring goals with talent
+          if (goalLower.includes('hiring') || goalLower.includes('talent')) {
+            return jobTitle.includes('engineer') || jobTitle.includes('developer') || 
+                   jobTitle.includes('designer') || jobTitle.includes('manager')
+          }
+          
+          // Match partnership goals with business development
+          if (goalLower.includes('partnership') || goalLower.includes('business development')) {
+            return jobTitle.includes('business') || jobTitle.includes('partnership') || 
+                   jobTitle.includes('sales') || jobTitle.includes('marketing')
+          }
+
+          return false
+        })
+      })
+
+      // Send invitations to top 5 relevant contacts
+      const topContacts = relevantContacts.slice(0, 5)
+      
+      for (const contact of topContacts) {
+        // Create invitation record
+        await blink.db.eventInvitations.create({
+          id: `invitation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          eventId: eventId,
+          inviterUserId: userId,
+          inviteeEmail: contact.email,
+          invitationReason: `AI matched based on your goals and their profile: ${contact.job_title} at ${contact.company || 'their company'}`,
+          status: 'sent',
+          sentAt: new Date().toISOString()
+        })
+
+        // In a real app, you would send actual emails here
+        // For now, we'll just log the invitation
+        console.log(`AI Invitation sent to ${contact.email} for event ${eventId}`)
+      }
+
+      if (topContacts.length > 0) {
+        toast({
+          title: "AI Invitations Sent!",
+          description: `Sent ${topContacts.length} invitations to relevant contacts from your network.`
+        })
+      }
+
+    } catch (error) {
+      console.error('Error generating AI invitations:', error)
+    }
+  }, [toast])
 
   useEffect(() => {
     loadDashboardData()
@@ -83,14 +184,30 @@ export default function Dashboard() {
 
       // Register for event
       await blink.db.eventParticipants.create({
+        id: `participant_${Date.now()}`,
         eventId: eventId,
         userId: authUser.id,
         status: 'registered'
       })
 
+      // Update event participant count
+      const eventData = await blink.db.events.list({
+        where: { id: eventId },
+        limit: 1
+      })
+
+      if (eventData.length > 0) {
+        await blink.db.events.update(eventId, {
+          currentParticipants: eventData[0].currentParticipants + 1
+        })
+      }
+
+      // AI-powered invitation system: Find relevant contacts to invite
+      await generateAIInvitations(authUser.id, eventId)
+
       toast({
         title: "RSVP confirmed!",
-        description: "You've been registered for the event."
+        description: "You've been registered for the event. AI is finding relevant contacts to invite!"
       })
 
       // Refresh events
@@ -104,6 +221,8 @@ export default function Dashboard() {
       })
     }
   }
+
+
 
   const handleLogout = () => {
     blink.auth.logout()
