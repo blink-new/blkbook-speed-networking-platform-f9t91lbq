@@ -10,6 +10,8 @@ import { Progress } from '@/components/ui/progress'
 import { X, Plus, ArrowRight, ArrowLeft } from 'lucide-react'
 import { blink } from '@/blink/client'
 import { useToast } from '@/hooks/use-toast'
+import { ContactSyncService, type Contact } from '@/utils/contactSync'
+import { EmailService } from '@/utils/emailService'
 
 const COMMON_GOALS = [
   'Find investors', 'Raise funding', 'Find co-founder', 'Business partnerships',
@@ -28,6 +30,8 @@ export default function OnboardingFlow() {
   const { toast } = useToast()
   const [currentStep, setCurrentStep] = useState(1)
   const [loading, setLoading] = useState(false)
+  const [importedContacts, setImportedContacts] = useState<Contact[]>([])
+  const [isImporting, setIsImporting] = useState(false)
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -42,7 +46,7 @@ export default function OnboardingFlow() {
     customSkill: ''
   })
 
-  const totalSteps = 3
+  const totalSteps = 4
   const progress = (currentStep / totalSteps) * 100
 
   const handleNext = () => {
@@ -97,6 +101,69 @@ export default function OnboardingFlow() {
     }
   }
 
+  const handleCSVImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsImporting(true)
+    try {
+      const contacts = await ContactSyncService.importFromCSV(file)
+      setImportedContacts(contacts)
+      
+      toast({
+        title: "Contacts imported successfully!",
+        description: `Imported ${contacts.length} contacts from CSV file.`
+      })
+    } catch (error) {
+      console.error('Error importing CSV:', error)
+      toast({
+        title: "Error importing contacts",
+        description: "Please check your CSV format and try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  const handleLinkedInConnect = async () => {
+    try {
+      const authUrl = await ContactSyncService.connectLinkedIn()
+      window.open(authUrl, '_blank', 'width=600,height=600')
+      
+      toast({
+        title: "LinkedIn authorization opened",
+        description: "Complete the authorization in the popup window."
+      })
+    } catch (error) {
+      console.error('Error connecting LinkedIn:', error)
+      toast({
+        title: "Error connecting LinkedIn",
+        description: "Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleGmailConnect = async () => {
+    try {
+      const authUrl = await ContactSyncService.connectGmail()
+      window.open(authUrl, '_blank', 'width=600,height=600')
+      
+      toast({
+        title: "Gmail authorization opened",
+        description: "Complete the authorization in the popup window."
+      })
+    } catch (error) {
+      console.error('Error connecting Gmail:', error)
+      toast({
+        title: "Error connecting Gmail",
+        description: "Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
   const handleSubmit = async () => {
     setLoading(true)
     try {
@@ -114,9 +181,16 @@ export default function OnboardingFlow() {
         goals: JSON.stringify(formData.goals),
         skills: JSON.stringify(formData.skills),
         meetingLink: formData.meetingLink,
+        importedContacts: JSON.stringify(importedContacts),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       })
+
+      // Send welcome email
+      await EmailService.sendWelcomeEmail(
+        user.email,
+        formData.firstName
+      )
 
       toast({
         title: "Profile created successfully!",
@@ -144,6 +218,8 @@ export default function OnboardingFlow() {
         return formData.goals.length > 0 && formData.skills.length > 0
       case 3:
         return formData.meetingLink
+      case 4:
+        return true // Contact import is optional
       default:
         return false
     }
@@ -173,11 +249,13 @@ export default function OnboardingFlow() {
               {currentStep === 1 && "Basic Information"}
               {currentStep === 2 && "Goals & Skills"}
               {currentStep === 3 && "Meeting Preferences"}
+              {currentStep === 4 && "Import Contacts (Optional)"}
             </CardTitle>
             <CardDescription>
               {currentStep === 1 && "Tell us about yourself and your professional background"}
               {currentStep === 2 && "What are you looking to achieve through networking?"}
               {currentStep === 3 && "How would you like to connect with others?"}
+              {currentStep === 4 && "Import your contacts for better AI matching"}
             </CardDescription>
           </CardHeader>
 
@@ -334,6 +412,94 @@ export default function OnboardingFlow() {
               </div>
             )}
 
+            {/* Step 4: Contact Import */}
+            {currentStep === 4 && (
+              <div className="space-y-6">
+                <div className="text-center mb-6">
+                  <h3 className="text-lg font-semibold mb-2">Supercharge Your Networking</h3>
+                  <p className="text-muted-foreground">
+                    Import your contacts to help our AI find the perfect matches and send smart invitations
+                  </p>
+                </div>
+
+                {/* CSV Import */}
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="font-medium mb-2">📄 Upload CSV File</h4>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Upload a CSV file with columns: email, first_name, last_name, job_title, company
+                  </p>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCSVImport}
+                    disabled={isImporting}
+                    className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-accent-foreground hover:file:bg-accent/90"
+                  />
+                  {isImporting && (
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      Importing contacts...
+                    </div>
+                  )}
+                </div>
+
+                {/* LinkedIn Integration */}
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="font-medium mb-2">💼 Connect LinkedIn</h4>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Import your LinkedIn connections for professional networking
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    onClick={handleLinkedInConnect}
+                    className="w-full"
+                  >
+                    Connect LinkedIn
+                  </Button>
+                </div>
+
+                {/* Gmail Integration */}
+                <div className="border border-border rounded-lg p-4">
+                  <h4 className="font-medium mb-2">📧 Connect Gmail</h4>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Import your Gmail contacts for comprehensive networking
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    onClick={handleGmailConnect}
+                    className="w-full"
+                  >
+                    Connect Gmail
+                  </Button>
+                </div>
+
+                {/* Imported Contacts Summary */}
+                {importedContacts.length > 0 && (
+                  <div className="bg-secondary/50 p-4 rounded-lg">
+                    <h4 className="font-medium mb-2">✅ Contacts Imported</h4>
+                    <div className="space-y-2 text-sm">
+                      <p><strong>Total:</strong> {importedContacts.length} contacts</p>
+                      <p><strong>With Job Titles:</strong> {importedContacts.filter(c => c.jobTitle).length}</p>
+                      <p><strong>With Companies:</strong> {importedContacts.filter(c => c.company).length}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                  <h4 className="font-medium text-blue-900 mb-2">🤖 How AI Matching Works</h4>
+                  <ul className="text-sm text-blue-800 space-y-1">
+                    <li>• AI analyzes your goals and imported contacts</li>
+                    <li>• Finds relevant people based on job titles and companies</li>
+                    <li>• Sends personalized invitations when you RSVP to events</li>
+                    <li>• Learns from your networking behavior to improve matches</li>
+                  </ul>
+                </div>
+
+                <div className="text-center text-sm text-muted-foreground">
+                  You can always import contacts later from your dashboard
+                </div>
+              </div>
+            )}
+
             {/* Navigation */}
             <div className="flex justify-between pt-6">
               <Button
@@ -357,7 +523,7 @@ export default function OnboardingFlow() {
               ) : (
                 <Button
                   onClick={handleSubmit}
-                  disabled={!canProceed() || loading}
+                  disabled={loading}
                   className="bg-accent hover:bg-accent/90"
                 >
                   {loading ? "Creating Profile..." : "Complete Setup"}

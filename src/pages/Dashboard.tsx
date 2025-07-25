@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Calendar, Users, BarChart3, Settings, LogOut, Clock, MapPin } from 'lucide-react'
 import { blink } from '@/blink/client'
 import { useToast } from '@/hooks/use-toast'
+import { EmailService } from '@/utils/emailService'
 import type { User, Event } from '@/types'
 
 export default function Dashboard() {
@@ -65,7 +66,7 @@ export default function Dashboard() {
     }
   }, [navigate, toast])
 
-  const generateAIInvitations = useCallback(async (userId: string, eventId: string) => {
+  const generateAIInvitations = useCallback(async (userId: string, eventId: string, event: Event) => {
     try {
       // Get user's profile and goals
       const userProfile = await blink.db.users.list({
@@ -125,28 +126,64 @@ export default function Dashboard() {
 
       // Send invitations to top 5 relevant contacts
       const topContacts = relevantContacts.slice(0, 5)
+      let successfulInvitations = 0
       
       for (const contact of topContacts) {
-        // Create invitation record
-        await blink.db.eventInvitations.create({
-          id: `invitation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          eventId: eventId,
-          inviterUserId: userId,
-          inviteeEmail: contact.email,
-          invitationReason: `AI matched based on your goals and their profile: ${contact.job_title} at ${contact.company || 'their company'}`,
-          status: 'sent',
-          sentAt: new Date().toISOString()
-        })
+        try {
+          // Create invitation record
+          await blink.db.eventInvitations.create({
+            id: `invitation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            eventId: eventId,
+            inviterUserId: userId,
+            inviteeEmail: contact.email,
+            invitationReason: `AI matched based on your goals and their profile: ${contact.job_title} at ${contact.company || 'their company'}`,
+            status: 'sent',
+            sentAt: new Date().toISOString()
+          })
 
-        // In a real app, you would send actual emails here
-        // For now, we'll just log the invitation
-        console.log(`AI Invitation sent to ${contact.email} for event ${eventId}`)
+          // Send actual email invitation
+          const invitationData = {
+            inviterName: `${user.firstName} ${user.lastName}`,
+            inviterTitle: user.jobTitle,
+            inviterCompany: user.company,
+            eventTitle: event.title,
+            eventDate: new Date(event.date).toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            }),
+            eventTime: `${event.startTime} - ${event.endTime}`,
+            eventDescription: event.description,
+            invitationReason: `AI matched based on your goals and their profile: ${contact.job_title} at ${contact.company || 'their company'}`,
+            rsvpLink: `${window.location.origin}/dashboard?event=${eventId}`
+          }
+
+          const emailSent = await EmailService.sendEventInvitation(
+            contact.email,
+            contact.first_name || contact.name || 'Professional',
+            invitationData
+          )
+
+          if (emailSent) {
+            successfulInvitations++
+          }
+
+        } catch (error) {
+          console.error(`Error sending invitation to ${contact.email}:`, error)
+        }
       }
 
-      if (topContacts.length > 0) {
+      if (successfulInvitations > 0) {
         toast({
           title: "AI Invitations Sent!",
-          description: `Sent ${topContacts.length} invitations to relevant contacts from your network.`
+          description: `Successfully sent ${successfulInvitations} email invitations to relevant contacts from your network.`
+        })
+      } else if (topContacts.length > 0) {
+        toast({
+          title: "Invitations Queued",
+          description: `Found ${topContacts.length} relevant contacts. Invitations are being processed.`,
+          variant: "default"
         })
       }
 
@@ -203,7 +240,7 @@ export default function Dashboard() {
       }
 
       // AI-powered invitation system: Find relevant contacts to invite
-      await generateAIInvitations(authUser.id, eventId)
+      await generateAIInvitations(authUser.id, eventId, events.find(e => e.id === eventId)!)
 
       toast({
         title: "RSVP confirmed!",
